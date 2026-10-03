@@ -1,5 +1,7 @@
 # compose-paas
 
+> 📘 راهنمای کامل فارسی (توسعه‌دهنده، تأییدکننده، ادمین): [docs/fa/GUIDE-FA.md](docs/fa/GUIDE-FA.md)
+
 Jenkins as a small "platform as a service" for docker-compose apps.
 Developers get two buttons and nothing else:
 
