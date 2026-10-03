@@ -1,5 +1,5 @@
-// Job DSL, run by Jenkinsfile.sync. Generates the developer-facing jobs.
-// Bound variables: SERVICES (List), SERVICE_LINES (List), PIPELINE_REPO,
+// Job DSL, run by Jenkinsfile.refresh. Generates the developer-facing jobs.
+// Bound variables: PATHS (List), CD_REPO, CD_BRANCH, PIPELINE_REPO,
 // PIPELINE_BRANCH, GIT_CRED.
 
 def fromPipelineRepo(String scriptFile) {
@@ -20,31 +20,30 @@ def fromPipelineRepo(String scriptFile) {
     }
 }
 
-def serviceList = "Registered services:\n${SERVICE_LINES.join('\n')}"
+def repoLine = "CD repository: ${CD_REPO} (branch ${CD_BRANCH})"
 
-folder('paas') {
-    description('Self-service docker-compose deployments. You can only run these jobs - ' +
-                'services, git locations and target hosts are defined by the platform admins.')
+folder('cd') {
+    description("docker-compose files of the CD repository. ${repoLine}")
 }
 
-pipelineJob('paas/deploy-compose') {
-    description("Upload a docker-compose.yml for a service. After approval it is committed to the service's " +
-                "git repository and deployed to its host.\n\n${serviceList}")
+pipelineJob('cd/upload-compose') {
+    description("Upload a docker-compose.yml from your machine. Jenkins writes it to the selected path " +
+                "in the CD repository and pushes it.\n${repoLine}")
     parameters {
-        choiceParam('SERVICE', SERVICES, 'Service to deploy.')
+        choiceParam('TARGET', PATHS, 'Which compose file in the repository to replace.')
         stashedFile {
             name('COMPOSE_FILE')
-            description('Your docker-compose.yml.')
+            description('The docker-compose.yml from your machine.')
         }
         stringParam('CHANGE_NOTE', '', 'What changed and why (goes into the git commit message).')
     }
-    definition fromPipelineRepo('jenkins/Jenkinsfile.deploy')
+    definition fromPipelineRepo('jenkins/Jenkinsfile.upload')
 }
 
-pipelineJob('paas/show-compose') {
-    description("Fetch a service's current docker-compose.yml from git and print it in the console output.\n\n${serviceList}")
+pipelineJob('cd/show-compose') {
+    description("Fetch a compose file from the CD repository and print it in the console output.\n${repoLine}")
     parameters {
-        choiceParam('SERVICE', SERVICES, 'Service to show.')
+        choiceParam('TARGET', PATHS, 'Which compose file to show.')
     }
     definition fromPipelineRepo('jenkins/Jenkinsfile.show')
 }

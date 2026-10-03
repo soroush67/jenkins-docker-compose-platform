@@ -1,0 +1,3 @@
+services:
+  notifier:
+    image: registry.example.com/notifier:0.9.1

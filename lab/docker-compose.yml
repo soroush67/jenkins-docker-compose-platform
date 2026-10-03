@@ -1,8 +1,7 @@
-# Local test lab for compose-paas: GitLab CE (same version as the company
-# GitLab), Jenkins (the PaaS UI/control plane) and a deploy target (a Docker
-# host reachable only over SSH). Secrets live in .env / secrets/ (created by
-# up.sh, git-ignored). Container names/ports are deliberately different from
-# the git-policy lab so both can run side by side.
+# Local test lab for compose-cd: GitLab CE (same version as the company
+# GitLab) holding a CD repository, and Jenkins as the upload UI. Secrets live
+# in .env / secrets/ (created by up.sh, git-ignored). Container names/ports
+# differ from the git-policy lab so both can run side by side.
 name: compose-paas-lab
 
 services:
@@ -35,20 +34,6 @@ services:
       retries: 20
       start_period: 300s
 
-  # Stands in for a real application server: Docker + SSH, nothing else.
-  # Jenkins reaches it only with the deploy SSH key; developers never do.
-  # Apps it runs publish into 18080-18089, forwarded to this machine.
-  target:
-    build: ./target
-    container_name: cp-target
-    hostname: cp-target
-    restart: unless-stopped
-    privileged: true          # docker-in-docker (lab only)
-    ports:
-      - "18080-18089:18080-18089"
-    volumes:
-      - ./secrets/deploy_key.pub:/run/deploy_key.pub:ro
-      - target-docker:/var/lib/docker
 
   jenkins:
     build: ./jenkins
@@ -63,12 +48,10 @@ services:
     env_file: ./secrets/jenkins.env
     volumes:
       - jenkins-home:/var/jenkins_home
-      - ./secrets/deploy_key:/run/secrets/deploy-ssh-key:ro
       - ./secrets/gitlab-bot-token:/run/secrets/gitlab-bot-token:ro
 
 volumes:
   gitlab-config:
   gitlab-logs:
   gitlab-data:
-  target-docker:
   jenkins-home:

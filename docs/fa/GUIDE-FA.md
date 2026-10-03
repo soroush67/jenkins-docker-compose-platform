@@ -1,538 +1,337 @@
 <div dir="rtl">
 
-# راهنمای کامل compose-paas
+# راهنمای کامل compose-cd
 
-> **compose-paas** یعنی Jenkins به‌عنوان یک «پلتفرم سرویس» برای استقرار (deploy) برنامه‌هایی که با docker-compose اجرا می‌شوند.
+> **compose-cd** راهی است برای این‌که فایل‌های `docker-compose.yml` را از روی لپ‌تاپ خودتان، **از طریق Jenkins**، در repo مربوط به CD قرار دهید، بدون این‌که به آن repo دسترسی نوشتن داشته باشید.
 >
-> این راهنما سه بخش اصلی دارد؛ فقط بخشی را بخوانید که به نقش شما مربوط است:
->
-> - 👩‍💻 **توسعه‌دهنده** (کسی که فایل docker-compose.yml را می‌فرستد): [بخش ۳](#۳-راهنمای-توسعهدهنده)
-> - ✅ **تأییدکننده** (کسی که deploy را تأیید یا رد می‌کند): [بخش ۴](#۴-راهنمای-تأییدکننده)
-> - 🛠️ **ادمین پلتفرم** (کسی که سرویس‌ها، کاربران و سرورها را تعریف می‌کند): [بخش ۵](#۵-راهنمای-ادمین-پلتفرم)
->
-> محیط تست محلی (lab): [بخش ۶](#۶-محیط-تست-محلی-lab) — سؤالات متداول: [بخش ۷](#۷-سؤالات-متداول)
+> - 👩‍💻 **توسعه‌دهنده:** [بخش ۳](#۳-راهنمای-توسعهدهنده)
+> - 🛠️ **ادمین:** [بخش ۴](#۴-راهنمای-ادمین)
+> - 🧪 **محیط تست محلی (lab):** [بخش ۵](#۵-محیط-تست-محلی-lab)
+> - ❓ **سؤالات متداول:** [بخش ۶](#۶-سؤالات-متداول)
 
 ---
 
-## ۱. این سرویس چیست و چه مشکلی را حل می‌کند؟
+## ۱. این سرویس چه کار می‌کند؟
 
-قبلاً برای استقرار یک سرویس، توسعه‌دهنده باید به repoهای زیرساختی دسترسی نوشتن داشت، یا روی سرور SSH می‌زد و خودش `docker compose up` اجرا می‌کرد. یعنی دسترسی زیاد، بدون تأیید، و بدون سابقه‌ی مشخص.
-
-با compose-paas:
-
-- توسعه‌دهنده **فقط** در Jenkins یک سرویس را انتخاب می‌کند و فایل `docker-compose.yml` خودش را **آپلود** می‌کند.
-- یک **تأییدکننده** فایل را می‌بیند و تأیید یا رد می‌کند.
-- بعد از تأیید، **خود Jenkins** فایل را در **مسیر git تعریف‌شده** برای آن سرویس commit می‌کند و همان نسخه را روی **سرور تعریف‌شده** deploy می‌کند.
-- هر وقت لازم باشد، با یک job دیگر، Jenkins فایل فعلی را از git می‌خواند و در **Console Output** نشان می‌دهد.
-
-توسعه‌دهنده **هیچ‌وقت** به repoهای استقرار دسترسی نوشتن ندارد، به سرورها SSH نمی‌زند، و تنظیمات jobهای Jenkins را نمی‌بیند و نمی‌تواند تغییر دهد.
-
-### جریان کار در یک نگاه
+در repo مربوط به CD، هر پوشه یک فایل `docker-compose.yml` دارد. مثلاً:
 
 <div dir="ltr">
 
 ```
-توسعه‌دهنده                     Jenkins                          تأییدکننده
-─────────────                   ───────                          ──────────
-انتخاب سرویس +
-آپلود docker-compose.yml  ──►  ۱. خواندن services.yaml
-                                   (مسیر git، سرور، approverها)
-                                ۲. چاپ فایل در Console
-                                ۳. منتظر تأیید  ─────────────────►  بررسی فایل در Console
-                                                                   Approve  یا  Abort
-                                ◄──────────────────────────────────
-                                ۴. commit + push در git
-                                   (با نام درخواست‌دهنده و تأییدکننده)
-                                ۵. deploy روی سرور با Ansible
-                                   docker compose up -d --wait
-                                ۶. SUCCESS / FAILURE
+cd/
+├── services/payment/docker-compose.yml
+├── services/orders/docker-compose.yml
+├── services/notification/docker-compose.yaml
+└── infra/monitoring/compose.yaml
+```
+
+</div>
+
+با compose-cd:
+
+۱. در Jenkins، از یک **لیست کشویی** یکی از همین فایل‌ها را انتخاب می‌کنید.
+۲. نسخه‌ی جدید فایل را از لپ‌تاپ **آپلود** می‌کنید.
+۳. Jenkins فایل را **دقیقاً در همان مسیر** می‌گذارد، commit می‌کند و **git push** می‌کند.
+۴. از آن به بعد، CD شما مثل همیشه از روی repo کارش را انجام می‌دهد.
+
+هر وقت هم بخواهید، Jenkins فایل فعلی هر مسیر را از git می‌خواند و در **Console Output** نشان می‌دهد.
+
+<div dir="ltr">
+
+```
+لپ‌تاپ  ──آپلود──►  Jenkins (cd/upload-compose)
+                       ├─ clone تازه از repo
+                       ├─ بررسی: مسیر انتخابی هنوز در repo هست؟
+                       ├─ چاپ فایل در Console
+                       ├─ جایگزینی فایل + commit  (نویسنده = شما)
+                       └─ git push  ──►  repo CD  ──►  CD شما
 ```
 
 </div>
 
 ---
 
-## ۲. نقش‌ها و دسترسی‌ها
+## ۲. jobها و دسترسی‌ها
 
-| نقش | در Jenkins چه می‌بیند | چه کاری می‌تواند بکند | چه کاری نمی‌تواند بکند |
-|---|---|---|---|
-| **توسعه‌دهنده** | فقط پوشه‌ی `paas` و دو job داخل آن | درخواست deploy، دیدن فایل فعلی، دیدن Console | تأیید درخواست خودش، تغییر تنظیمات job، دیدن Workspace یا credentialها، دیدن پوشه‌ی `paas-admin`، Manage Jenkins |
-| **تأییدکننده** | مثل توسعه‌دهنده | علاوه بر کارهای توسعه‌دهنده: تأیید یا رد درخواست **دیگران** برای سرویس‌هایی که در فهرست approverهایشان است | تأیید درخواست **خودش** |
-| **ادمین پلتفرم** | همه‌چیز | تعریف سرویس‌ها، کاربران، سرورها، credentialها | — (اما او هم نمی‌تواند درخواست خودش را تأیید کند) |
-
-> ⚠️ قانون «هیچ‌کس درخواست خودش را تأیید نمی‌کند» برای **همه** اجرا می‌شود، حتی ادمین. اگر ادمین درخواستی بدهد و خودش آن را تأیید کند، build با خطا تمام می‌شود و هیچ چیزی commit یا deploy نمی‌شود.
-
-### jobها
-
-| job | برای چه کسی | کار |
+| job | چه کسی | کار |
 |---|---|---|
-| `paas/deploy-compose` | توسعه‌دهنده | آپلود فایل ← تأیید ← commit در git ← deploy |
-| `paas/show-compose` | توسعه‌دهنده | خواندن فایل فعلی از git و نمایش آن در Console |
-| `paas-admin/sync-registry` | فقط ادمین | خواندن `services.yaml` و ساختن یا به‌روز کردن دو job بالا |
+| `cd/upload-compose` | توسعه‌دهنده | آپلود فایل و push در مسیر انتخاب‌شده |
+| `cd/show-compose` | توسعه‌دهنده | نمایش فایل فعلی یک مسیر در Console |
+| `cd-admin/refresh-paths` | ادمین (و خودکار) | به‌روز کردن لیست مسیرها از روی repo |
+
+**توسعه‌دهنده:**
+- فقط پوشه‌ی `cd` و دو job آن را می‌بیند.
+- تنظیمات job، Workspace، credentialها، پوشه‌ی `cd-admin` و Manage Jenkins را نمی‌بیند.
+- به repo دسترسی نوشتن ندارد. فقط کاربر bot جنکینز push می‌کند.
+- **فقط** در مسیرهایی که از قبل در repo هستند می‌تواند فایل بگذارد. فایل یا پوشه‌ی جدید نمی‌تواند بسازد.
 
 ---
 
 ## ۳. راهنمای توسعه‌دهنده
 
-### ۳-۱. ورود
+### ۳-۱. آپلود فایل (قدم به قدم)
 
-۱. آدرس Jenkins را در مرورگر باز کنید (در محیط تست: `http://localhost:8090`).
-۲. با نام کاربری و رمزی که ادمین به شما داده وارد شوید.
-۳. در صفحه‌ی اول فقط پوشه‌ی **paas** را می‌بینید. روی آن کلیک کنید.
-
-### ۳-۲. فرستادن یک deploy (قدم به قدم)
-
-۱. روی job **`deploy-compose`** کلیک کنید.
-۲. در منوی سمت چپ روی **Build with Parameters** بزنید.
-۳. فرم را پر کنید:
+۱. آدرس Jenkins را باز کنید و با نام کاربری خودتان وارد شوید.
+۲. پوشه‌ی **cd** را باز کنید و روی **upload-compose** کلیک کنید.
+۳. در منوی سمت چپ روی **Build with Parameters** بزنید.
+۴. فرم را پر کنید:
 
 | فیلد | توضیح |
 |---|---|
-| **SERVICE** | نام سرویس از فهرست. فقط سرویس‌هایی که ادمین تعریف کرده در فهرست هستند. اگر سرویس شما نیست، از ادمین بخواهید اضافه‌اش کند. |
-| **COMPOSE_FILE** | فایل `docker-compose.yml` خود را با دکمه‌ی انتخاب فایل آپلود کنید. نام فایل روی کامپیوتر شما مهم نیست؛ همیشه با نام و مسیری که برای سرویس تعریف شده در git ذخیره می‌شود. |
-| **CHANGE_NOTE** | توضیح کوتاه: چه چیزی تغییر کرده و چرا. این متن در پیام commit در git ثبت می‌شود. مثال: `upgrade nginx to 1.27`. |
+| **TARGET** | مسیر فایلی که می‌خواهید عوض شود، از لیست. مثلاً `services/payment/docker-compose.yml` |
+| **COMPOSE_FILE** | فایل جدید را از لپ‌تاپ انتخاب کنید. اسم فایل روی لپ‌تاپ مهم نیست؛ همیشه در مسیر TARGET ذخیره می‌شود. |
+| **CHANGE_NOTE** | توضیح کوتاه تغییر. این متن عنوان commit در git می‌شود. مثال: `bump payment-api to 1.5.0` |
 
-۴. روی **Build** بزنید.
-۵. یک build جدید در **Build History** (پایین سمت چپ) ظاهر می‌شود. روی شماره‌ی آن و بعد روی **Console Output** کلیک کنید.
+۵. روی **Build** بزنید.
+۶. در **Build History** روی build جدید و بعد روی **Console Output** کلیک کنید.
 
-### ۳-۳. بعد از فرستادن چه اتفاقی می‌افتد؟
-
-در Console Output، اول خلاصه‌ی درخواست شما و **محتوای کامل فایلی که آپلود کرده‌اید** چاپ می‌شود:
+### ۳-۲. در Console چه می‌بینید؟
 
 <div dir="ltr">
 
 ```
-==================== deploy request ====================
-service      : hello-web
-requested by : dev1
-change note  : upgrade nginx
-git target   : http://.../hello-web-deploy.git  (branch main)  deploy/docker-compose.yml
-deploy to    : app-server-01:/opt/apps/hello-web
-approvers    : approver1, admin
------------------- uploaded docker-compose.yml ------------------
+==================== upload ====================
+repository  : https://gitlab.example.com/platform/cd.git  (branch main)
+path        : services/payment/docker-compose.yml
+uploaded by : dev1
+change note : bump payment-api to 1.5.0
+--------------- uploaded file ---------------
 services:
-  web:
-    image: nginx:1.27-alpine
+  payment-api:
+    image: registry.example.com/payment-api:1.5.0
     ...
-==========================================================
-Deploy hello-web to app-server-01 (requested by dev1)? ...
-Approve & deploy or Abort
-```
-
-</div>
-
-**دقت کنید که فایل درست را فرستاده‌اید.** از اینجا به بعد build منتظر تأیید می‌ماند.
-
-- به یکی از افرادی که در خط `approvers` آمده‌اند خبر دهید که درخواست شما منتظر است. لینک build را برایشان بفرستید.
-- شما **نمی‌توانید** درخواست خودتان را تأیید کنید. اگر روی `Approve & deploy` بزنید، پیغام «You need to be ... to submit this» را می‌بینید.
-- اگر پشیمان شدید یا فایل اشتباه فرستادید، build را با دکمه‌ی **✕ (توقف)** کنار build متوقف کنید و یک درخواست جدید بفرستید.
-- اگر تا **۲۴ ساعت** کسی تأیید نکند، درخواست خودبه‌خود لغو می‌شود (ABORTED).
-
-بعد از تأیید، در ادامه‌ی همان Console می‌بینید:
-
-<div dir="ltr">
-
-```
-Approved by approver1
-Committed and pushed:
-  3f2a9c1e...
-  author dev1, ...
-TASK [docker compose up] ...
-...
-Deployed hello-web @ 3f2a9c1e04 to app-server-01:/opt/apps/hello-web
+================================================
+ services/payment/docker-compose.yml | 2 +-
+Pushed services/payment/docker-compose.yml to main as commit 3f2a9c1e...
+https://gitlab.example.com/platform/cd/-/commit/3f2a9c1e...
 Finished: SUCCESS
 ```
 
 </div>
 
-### ۳-۴. معنی وضعیت‌های build
-
-| وضعیت | معنی | چه کار کنید |
-|---|---|---|
-| ⏸️ آبی چشمک‌زن / «Paused for Input» | منتظر تأیید | به approver خبر دهید |
-| ✅ **SUCCESS** | فایل در git commit شد و روی سرور بالا آمد | — |
-| ⚪ **ABORTED** | درخواست رد شد، یا لغو شد، یا ۲۴ ساعت منتظر ماند | هیچ چیزی در git یا روی سرور عوض نشده. در صورت نیاز دوباره بفرستید |
-| ❌ **FAILURE** | خطا رخ داد | Console را بخوانید؛ جدول خطاها در [بخش ۳-۷](#۳-۷-خطاهای-رایج-و-معنی-آنها) |
-| 🟡 **UNSTABLE** (فقط در show-compose) | برای این سرویس هنوز هیچ فایلی deploy نشده | — |
-
-> ⚠️ **ترتیب کار «اول commit، بعد deploy» است.** اگر فایل تأیید شود و commit شود ولی deploy روی سرور خطا بدهد (مثلاً کانتینر بالا نیاید)، **فایل جدید در git می‌ماند** و build قرمز (FAILURE) می‌شود. مشکل را درست کنید و نسخه‌ی اصلاح‌شده را دوباره بفرستید، یا نسخه‌ی قبلی را بفرستید (بخش [۳-۸](#۳-۸-برگرداندن-نسخهی-قبلی-rollback)).
-
-### ۳-۵. دیدن فایل فعلی یک سرویس (show-compose)
-
-۱. وارد پوشه‌ی **paas** شوید و job **`show-compose`** را باز کنید.
-۲. **Build with Parameters** ← سرویس را انتخاب کنید ← **Build**.
-۳. روی build جدید و بعد روی **Console Output** کلیک کنید.
-
-Jenkins فایل را **همان لحظه** از git می‌خواند و نشان می‌دهد:
+با لینک آخر، commit را مستقیم در GitLab می‌بینید. در GitLab، **نویسنده‌ی commit شما هستید** و پیام commit این‌طور است:
 
 <div dir="ltr">
 
 ```
-==================== hello-web ====================
-repo        : http://.../hello-web-deploy.git
-branch/path : main:deploy/docker-compose.yml
-deployed to : app-server-01:/opt/apps/hello-web
-last change : 3f2a9c1  2026-10-03 13:58:47 +0000  by dev1
-deploy(hello-web): upgrade nginx
+services/payment/docker-compose.yml: bump payment-api to 1.5.0
 
-Requested-by: dev1
-Approved-by: approver1
-Jenkins-build: http://jenkins/job/paas/job/deploy-compose/12/
---------------------- docker-compose.yml ---------------------
-services:
-  web:
-    ...
-==============================================================
+Uploaded-by: dev1
+Jenkins-build: https://jenkins.example.com/job/cd/job/upload-compose/12/
 ```
 
 </div>
 
-این job **فقط خواندنی** است، به تأیید نیاز ندارد و هیچ چیزی را تغییر نمی‌دهد. هر چند بار خواستید اجرایش کنید.
+### ۳-۳. دیدن فایل فعلی (show-compose)
 
-> 💡 بهترین روش برای تغییر یک سرویس: اول show-compose را اجرا کنید، فایل فعلی را از Console کپی کنید، تغییرتان را بدهید، و همان را با deploy-compose بفرستید. این‌طوری چیزی را که قبلاً بوده تصادفاً پاک نمی‌کنید.
+۱. پوشه‌ی **cd** را باز کنید و job **show-compose** را انتخاب کنید.
+۲. **Build with Parameters** را بزنید، TARGET را انتخاب کنید و **Build** را بزنید.
+۳. در **Console Output** این را می‌بینید:
 
-### ۳-۶. نکته‌های مهم در نوشتن docker-compose.yml
+<div dir="ltr">
 
-| نکته | توضیح |
+```
+==================== services/payment/docker-compose.yml ====================
+repository  : https://gitlab.example.com/platform/cd.git  (branch main)
+last change : 3f2a9c1  2026-10-03 15:40:12 +0330  by dev1
+services/payment/docker-compose.yml: bump payment-api to 1.5.0
+Uploaded-by: dev1
+---------------------------------------------------
+services:
+  payment-api:
+    ...
+```
+
+</div>
+
+این job فقط خواندنی است و هیچ چیزی را تغییر نمی‌دهد.
+
+> 💡 **روش پیشنهادی برای تغییر:** اول show-compose را اجرا کنید و فایل فعلی را از Console کپی کنید. تغییرتان را روی همان بدهید و بعد آپلود کنید. این‌طوری چیزی را که کس دیگری قبلاً اضافه کرده، تصادفاً پاک نمی‌کنید.
+
+### ۳-۴. معنی نتیجه‌ی build
+
+| نتیجه | معنی |
 |---|---|
-| **فقط یک فایل** | فقط `docker-compose.yml` منتقل می‌شود. فایل‌های کنار آن (`.env`، `nginx.conf`، اسکریپت‌ها و ...) **منتقل نمی‌شوند**. bind mount نسبی مثل `./nginx.conf:/etc/nginx/nginx.conf` روی سرور پیدا نمی‌شود. از imageهایی استفاده کنید که تنظیماتشان داخل خود image است، یا با ادمین هماهنگ کنید. |
-| **فایل کامل بفرستید** | فایل جدید **جایگزین کامل** فایل قبلی می‌شود. هر سرویسی که از فایل حذف کنید، روی سرور **حذف می‌شود** (`--remove-orphans`). |
-| **نسخه‌ی image را ثابت کنید** | به جای `nginx:latest` بنویسید `nginx:1.27-alpine`. با `latest` معلوم نیست چه نسخه‌ای اجرا می‌شود و برگشت به نسخه‌ی قبلی ممکن نیست. |
-| **healthcheck بگذارید** | deploy با `--wait` اجرا می‌شود: Jenkins تا ۱۸۰ ثانیه صبر می‌کند تا همه‌ی کانتینرها **running** (و اگر healthcheck دارند **healthy**) شوند. اگر کانتینری crash کند یا healthy نشود، build با **FAILURE** تمام می‌شود. با healthcheck، Jenkins واقعاً می‌فهمد برنامه‌ی شما سالم بالا آمده یا نه. |
-| **پورت‌ها** | پورتی که منتشر می‌کنید (`ports:`) نباید روی آن سرور در اختیار سرویس دیگری باشد. پورت‌های مجاز را از ادمین بپرسید. |
-| **نام پروژه** | نام پروژه‌ی compose همیشه **نام سرویس** است (مثلاً `hello-web`)؛ `name:` داخل فایل را نگذارید. volumeهای نام‌دار هم با این پیشوند ساخته می‌شوند (`hello-web_data`) و در deployهای بعدی **حفظ می‌شوند**. |
-| **رمز و secret** | رمز عبور را مستقیم در فایل ننویسید: فایل در git ذخیره می‌شود و در Console چاپ می‌شود و همه‌ی کسانی که به آن دسترسی دارند آن را می‌بینند. |
-| **درستی فایل** | فایل قبل از تأیید به‌صورت خودکار بررسی **نمی‌شود**؛ تنها کنترل، نگاه تأییدکننده است. قبل از فرستادن روی کامپیوتر خودتان `docker compose -f docker-compose.yml config` را اجرا کنید تا مطمئن شوید فایل معتبر است. |
+| ✅ **SUCCESS** و `Pushed ... as commit ...` | فایل در git ثبت و push شد |
+| ✅ **SUCCESS** و `identical ... nothing to commit` | فایلی که فرستادید با نسخه‌ی git فرقی نداشت؛ commitی ساخته نشد |
+| ❌ **FAILURE** | هیچ چیزی در git تغییر نکرد؛ دلیلش در Console است (جدول پایین) |
 
-### ۳-۷. خطاهای رایج و معنی آن‌ها
+### ۳-۵. خطاهای رایج
 
 | پیغام در Console | معنی | راه‌حل |
 |---|---|---|
-| `No docker-compose.yml was uploaded (COMPOSE_FILE is empty).` | فایل انتخاب نشده یا خالی بوده | دوباره بفرستید و فایل را انتخاب کنید |
-| `Service 'x' is not in services.yaml (any more)` | سرویس از فهرست ادمین حذف شده ولی هنوز در dropdown هست | به ادمین خبر دهید تا `sync-registry` را اجرا کند |
-| `No approver other than <شما> is configured for <سرویس>` | تنها approver این سرویس خود شما هستید و کس دیگری نیست که تأیید کند | از ادمین بخواهید approver دیگری اضافه کند |
-| `<نام> requested this deploy and cannot approve it.` | کسی (معمولاً ادمین) درخواست خودش را تأیید کرده | کس دیگری باید تأیید کند؛ درخواست را دوباره بفرستید |
-| `You need to be ... to submit this` (موقع زدن Approve) | شما اجازه‌ی تأیید این درخواست را ندارید | به یکی از approverهای نام‌برده خبر دهید |
-| `Timeout has been exceeded` | ۲۴ ساعت کسی تأیید نکرد | دوباره بفرستید |
-| در مرحله‌ی `docker compose up`: `container ... exited` یا `is unhealthy` یا `dependency failed` | کانتینر شما بالا نیامد یا سالم نشد | مشکل فایل یا image را درست کنید. توجه: فایل در git commit شده است ([۳-۴](#۳-۴-معنی-وضعیتهای-build)) |
-| در مرحله‌ی `docker compose up`: `port is already allocated` | پورتی که منتشر کرده‌اید روی سرور اشغال است | پورت دیگری بگذارید (با ادمین هماهنگ کنید) |
-| `pull access denied` / `manifest unknown` | نام یا tag image اشتباه است، یا registry در دسترس نیست | نام image را بررسی کنید |
-| `UNREACHABLE` در Ansible | Jenkins به سرور مقصد وصل نمی‌شود | به ادمین خبر دهید (مشکل شبکه، SSH یا سرور) |
-| `git push` rejected | مشکل دسترسی bot به repo یا branch محافظت‌شده | به ادمین خبر دهید |
+| `No file was uploaded (COMPOSE_FILE is empty).` | فایلی انتخاب نشده یا فایل خالی است | دوباره بفرستید و فایل را انتخاب کنید |
+| `'...' is not an existing compose file in ... any more` | این مسیر دیگر در repo نیست (مثلاً کسی پوشه را حذف کرده) و لیست هنوز به‌روز نشده | چند دقیقه صبر کنید تا لیست خودکار به‌روز شود، یا به ادمین بگویید `refresh-paths` را اجرا کند |
+| `push rejected (attempt 1) - rebasing on the latest main` | هم‌زمان کس دیگری در repo push کرده بود | کاری لازم نیست؛ Jenkins خودش تغییر شما را روی آخرین نسخه می‌گذارد و دوباره push می‌کند |
+| `push failed 3 times` یا خطای دسترسی در `git push` | Jenkins نتوانست push کند (مثلاً branch محافظت‌شده یا مشکل token) | به ادمین خبر دهید |
+| `CONFLICT` هنگام rebase | کس دیگری **همین فایل** را هم‌زمان تغییر داده | show-compose را اجرا کنید، نسخه‌ی جدید را ببینید و تغییرتان را روی آن دوباره بفرستید |
 
-### ۳-۸. برگرداندن نسخه‌ی قبلی (rollback)
+### ۳-۶. نکته‌های مهم
 
-دکمه‌ی جداگانه‌ای برای rollback وجود ندارد. راه درست:
+- **فایل کامل بفرستید.** فایل آپلودی **کل** فایل قبلی را جایگزین می‌کند؛ ادغام (merge) نمی‌شود.
+- **فقط مسیرهای موجود.** اگر برای یک سرویس جدید پوشه‌ی تازه لازم دارید، از ادمین بخواهید آن را در repo بسازد. بعد از به‌روز شدن لیست، از طریق Jenkins فایلش را عوض کنید.
+- **بررسی خودکار و تأیید ندارد.** فایل مستقیم در branch اصلی push می‌شود و CD شما آن را برمی‌دارد. قبل از آپلود، روی لپ‌تاپ درستی فایل را با این دستور چک کنید (پایین).
 
-۱. نسخه‌ی قبلی فایل را پیدا کنید: در Console Output یک deploy موفق قبلی (Build History همان job)، فایل کامل چاپ شده است. از آنجا کپی کنید.
-۲. آن را در یک فایل `docker-compose.yml` ذخیره کنید.
-۳. مثل یک deploy معمولی بفرستید و در CHANGE_NOTE بنویسید `rollback to build #N`.
+<div dir="ltr">
 
-این‌طوری rollback هم مثل هر تغییر دیگری تأیید می‌شود و در git ثبت می‌شود.
+```
+docker compose -f docker-compose.yml config
+```
 
-### ۳-۹. چیزهایی که عمداً نمی‌توانید انجام دهید
+</div>
 
-- انتخاب repo، مسیر git یا سرور مقصد (این‌ها را ادمین برای هر سرویس تعریف می‌کند)
-- تغییر تنظیمات jobها یا دیدن Workspace یا credentialهای Jenkins
-- تأیید درخواست خودتان
-- اجرای دستور دلخواه روی سرور (فقط `docker compose up` اجرا می‌شود)
+- **رمز و secret ننویسید.** فایل در git ذخیره و در Console چاپ می‌شود.
+- **برگرداندن نسخه‌ی قبلی:** نسخه‌ی قبلی فایل در Console Output buildهای قبلی (Build History) یا در تاریخچه‌ی GitLab هست. آن را ذخیره کنید و مثل یک آپلود معمولی بفرستید (مثلاً با CHANGE_NOTE `rollback to build #12`).
 
 ---
 
-## ۴. راهنمای تأییدکننده
+## ۴. راهنمای ادمین
 
-تأییدکننده **تنها کنترل** قبل از deploy است. هیچ بررسی خودکاری روی فایل انجام نمی‌شود، پس دقت شما اهمیت دارد.
+### ۴-۱. اجزا
 
-### ۴-۱. پیدا کردن درخواست‌های منتظر
+| جزء | توضیح |
+|---|---|
+| **repo پایپ‌لاین‌ها** (همین پروژه) | `jenkins/Jenkinsfile.upload`، `Jenkinsfile.show`، `Jenkinsfile.refresh`، `jobs.groovy`، `cdrepo.groovy` |
+| **repo CD** | جایی که فایل‌های compose هستند و Jenkins در آن push می‌کند |
+| **کاربر bot در GitLab** | تنها کاربری که از طرف Jenkins push می‌کند |
+| **credential در Jenkins** | نام کاربری و token همان bot |
 
-- توسعه‌دهنده معمولاً لینک build را برایتان می‌فرستد.
-- یا: پوشه‌ی **paas** ← **deploy-compose** ← در Build History، buildهایی که در حال اجرا هستند (آیکن چشمک‌زن) منتظر تأییدند. در Stage View، مرحله‌ی **Approval** به‌صورت «paused» دیده می‌شود.
+### ۴-۲. تنظیمات (متغیرهای سراسری Jenkins)
 
-### ۴-۲. بررسی و تصمیم
+مسیر: Manage Jenkins ← System ← Global properties ← Environment variables
 
-۱. build را باز کنید و به **Console Output** بروید.
-۲. بخش `deploy request` را بخوانید: سرویس، درخواست‌دهنده، توضیح تغییر، سرور مقصد و **فایل کامل**.
-۳. اگر لازم است نسخه‌ی فعلی را ببینید و مقایسه کنید، `show-compose` را برای همان سرویس اجرا کنید.
-۴. در پایین Console:
-   - **Approve & deploy** ← فایل commit و deploy می‌شود.
-   - **Abort** ← درخواست رد می‌شود و **هیچ چیزی** در git یا روی سرور تغییر نمی‌کند.
-
-(همین دکمه‌ها از منوی سمت چپ build با نام **Paused for Input** هم در دسترس‌اند.)
-
-### ۴-۳. چک‌لیست پیشنهادی قبل از تأیید
-
-- [ ] سرویس و سرور مقصد همان چیزی است که انتظار دارید؟
-- [ ] نسخه‌ی imageها ثابت است (`latest` نیست)؟
-- [ ] `privileged: true`، `network_mode: host`، `pid: host` یا `cap_add` ندارد (مگر عمداً)؟
-- [ ] مسیرهای حساس سرور را mount نکرده؟ (`/`، `/etc`، `/var/run/docker.sock`، ...)
-- [ ] رمز یا secret داخل فایل نیست؟
-- [ ] پورت‌ها با بقیه‌ی سرویس‌های آن سرور تداخل ندارند؟
-- [ ] سرویسی که در نسخه‌ی قبلی بوده تصادفاً حذف نشده؟ (حذف از فایل = حذف از سرور)
-
-### ۴-۴. محدودیت‌ها
-
-- فقط کسانی که نامشان در `approvers` همان سرویس آمده می‌توانند تأیید کنند.
-- درخواست **خودتان** را نمی‌توانید تأیید کنید؛ یک approver دیگر باید این کار را بکند.
-- در git، پیام هر commit شامل `Approved-by: <نام شما>` است. تأیید شما ثبت و قابل پیگیری است.
-
----
-
-## ۵. راهنمای ادمین پلتفرم
-
-### ۵-۱. اجزای سیستم
-
-| جزء | کجاست | چه کسی تغییرش می‌دهد |
+| متغیر | مثال | توضیح |
 |---|---|---|
-| **repo پایپ‌لاین‌ها** (همین پروژه: `jenkins/`، `ansible/`) | GitLab، مثلاً `platform/compose-paas` | فقط ادمین |
-| **repo تنظیمات** (`services.yaml`) | GitLab، مثلاً `platform/paas-config` | فقط ادمین |
-| **repoهای استقرار هر سرویس** (جایی که docker-compose.yml commit می‌شود) | GitLab | فقط bot جنکینز push می‌کند. توسعه‌دهنده‌ها حداکثر دسترسی خواندن دارند |
-| **credential git** (`PAAS_GIT_CRED`) | Jenkins | ادمین |
-| **کلید SSH deploy** (`PAAS_SSH_CRED`) | Jenkins | ادمین |
+| `CD_REPO` | `https://gitlab.example.com/platform/cd.git` | آدرس repo CD |
+| `CD_BRANCH` | `main` | branchی که از آن خوانده و در آن push می‌شود |
+| `CD_GIT_CRED` | `gitlab-bot` | شناسه‌ی credential از نوع *Username with password*: نام کاربری bot و token |
+| `CD_PIPELINE_REPO` | `https://gitlab.example.com/platform/compose-cd.git` | آدرس repo همین پروژه |
+| `CD_PIPELINE_BRANCH` | `main` | |
+| `CD_PATH_REGEX` | (اختیاری) `^services/.*(docker-)?compose\.ya?ml$` | کدام فایل‌ها در لیست بیایند (به سبک `grep -E`). اگر خالی باشد، همه‌ی `docker-compose.yml`، `docker-compose.yaml`، `compose.yml` و `compose.yaml`ها می‌آیند. با این متغیر می‌توانید مثلاً پوشه‌ی `infra/` را از دسترس توسعه‌دهنده‌ها بیرون بگذارید. |
 
-### ۵-۲. تعریف، تغییر یا حذف یک سرویس
+### ۴-۳. نصب روی Jenkins واقعی
 
-همه‌چیز در فایل `services.yaml` در repo تنظیمات است:
+۱. **repo پایپ‌لاین‌ها:** این پروژه را در GitLab سازمان push کنید (مثلاً `platform/compose-cd`).
+۲. **کاربر bot:** در GitLab یک کاربر بسازید (مثلاً `jenkins-bot`) و برایش یک Personal Access Token با scopeهای `read_repository` و `write_repository` بگیرید. این کاربر روی repo پایپ‌لاین‌ها دسترسی خواندن و روی repo CD دسترسی push به `CD_BRANCH` لازم دارد. اگر branch محافظت‌شده است، در *Protected branches* به این کاربر اجازه‌ی push بدهید.
+۳. **پلاگین‌ها:** فهرست کامل در `lab/jenkins/plugins.txt` است (مهم‌ترین‌ها: `role-strategy`، `file-parameters`، `job-dsl`، `lockable-resources`، `credentials-binding`، `git`). پلاگین‌ها را به‌روز نگه دارید.
+۴. **agent:** یک agent با label **`cd`** که `git` روی آن نصب باشد.
+۵. **credential:** Manage Jenkins ← Credentials ← System ← Global ← *Username with password* با ID مثلاً `gitlab-bot`.
+۶. **متغیرهای سراسری:** مطابق [بخش ۴-۲](#۴-۲-تنظیمات-متغیرهای-سراسری-jenkins).
+۷. **امنیت Job DSL:** Manage Jenkins ← Security ← *Enable script security for Job DSL scripts* را خاموش کنید، یا بعد از اولین اجرای refresh اسکریپت را در *In-process Script Approval* تأیید کنید.
+۸. **نقش‌ها** (پلاگین Role-based Authorization Strategy):
+   - نقش سراسری برای همه‌ی کاربران وارد شده: `Overall/Read`
+   - نقش Item با نام `cd-user` و الگوی `cd(/.*)?`، با دسترسی‌های `Job/Read` و `Job/Build`
+   - توسعه‌دهنده‌ها (یا گروه LDAP آن‌ها) را در **Assign Roles** به `cd-user` اضافه کنید.
+۹. **job ادمین:** پوشه‌ی `cd-admin` بسازید و داخلش یک Pipeline با نام `refresh-paths`: *Pipeline script from SCM*، repo پایپ‌لاین‌ها، Script Path: `jenkins/Jenkinsfile.refresh`. فقط ادمین به این پوشه دسترسی داشته باشد.
+۱۰. `refresh-paths` را یک بار اجرا کنید. پوشه‌ی `cd` و دو job آن ساخته می‌شوند و polling خودکار هم فعال می‌شود.
+۱۱. با یک کاربر توسعه‌دهنده‌ی آزمایشی وارد شوید و بررسی کنید که فقط پوشه‌ی `cd` را می‌بیند.
 
-<div dir="ltr">
+> ⚠️ هرگز `Job/Configure`، `Job/Workspace` یا Credentials را به `cd-user` ندهید. با Configure هر کسی می‌تواند Jenkinsfile را عوض کند و به token برسد.
 
-```yaml
-defaults:
-  branch: main
-  approvers: [team-lead, platform-admin]     # شناسه‌ی کاربران Jenkins
+### ۴-۴. به‌روز شدن لیست مسیرها
 
-services:
-  hello-web:
-    description: "Static hello page"
-    repo: https://gitlab.example.com/platform/hello-web-deploy.git
-    path: deploy/docker-compose.yml
-    target_host: app-server-01.example.com
-    deploy_dir: /opt/apps/hello-web
-    approvers: [team-lead]                   # اختیاری؛ جایگزین defaults
-```
+- `refresh-paths` هر **۵ دقیقه** repo CD را چک می‌کند. اگر تغییری بوده باشد (پوشه یا فایل compose اضافه یا حذف شده)، لیست کشویی هر دو job را دوباره می‌سازد.
+- برای اعمال فوری، خودتان **Build Now** را بزنید.
+- حتی اگر لیست قدیمی باشد، **خطری ندارد**: هر آپلود قبل از نوشتن، مسیر را روی یک clone تازه دوباره چک می‌کند. اگر مسیر دیگر نباشد، build با خطا تمام می‌شود و هیچ فایلی ساخته نمی‌شود.
 
-</div>
+**اضافه کردن یک سرویس جدید:** پوشه و یک فایل compose اولیه را مستقیم در repo CD commit کنید (مثلاً `services/billing/docker-compose.yml`). بعد از refresh، این مسیر در لیست ظاهر می‌شود و توسعه‌دهنده‌ها می‌توانند فایلش را عوض کنند.
 
-| کلید | اجباری | توضیح |
-|---|---|---|
-| نام سرویس (مثلاً `hello-web`) | ✅ | فقط حروف کوچک انگلیسی، عدد، `-` و `_`، و با حرف یا عدد شروع شود. **همین نام، نام پروژه‌ی compose روی سرور است** — بعداً عوضش نکنید، وگرنه سرویس جدیدی کنار قبلی ساخته می‌شود. |
-| `description` | — | در توضیح job نمایش داده می‌شود |
-| `repo` | ✅ | آدرس HTTP(S) repo استقرار. bot باید روی آن دسترسی push داشته باشد |
-| `branch` | — | پیش‌فرض `main` |
-| `path` | ✅ | مسیر فایل داخل repo؛ نسبی و بدون `..` |
-| `target_host` | ✅ | نام یا IP سروری که Jenkins با SSH به آن وصل می‌شود |
-| `deploy_dir` | ✅ | مسیر مطلق روی سرور |
-| `approvers` | ✅ (اینجا یا در `defaults`) | فهرست شناسه‌ی کاربران Jenkins که می‌توانند تأیید کنند |
-
-**بعد از هر تغییر:**
-
-۱. تغییر را در repo تنظیمات commit و push کنید.
-۲. در Jenkins: **paas-admin** ← **sync-registry** ← **Build Now**.
-۳. Console را ببینید: فهرست سرویس‌ها چاپ می‌شود. اگر یکی از مقادیر اشتباه باشد، job با پیغام دقیق خطا متوقف می‌شود و jobهای توسعه‌دهنده دست نمی‌خورند.
-
-> 💡 حتی اگر `sync-registry` را فراموش کنید، هر build همیشه `services.yaml` را **همان لحظه** از git می‌خواند. پس تغییر مسیر، سرور یا approverها فوراً اعمال می‌شود. `sync-registry` فقط برای به‌روز کردن **فهرست کشویی** سرویس‌ها لازم است (اضافه یا حذف سرویس).
-
-**حذف یک سرویس:** حذف آن از `services.yaml` فقط جلوی deployهای بعدی را می‌گیرد؛ کانتینرهای در حال اجرا روی سرور **حذف نمی‌شوند**. برای خاموش کردن واقعی، روی سرور در `deploy_dir` دستور `docker compose -p <نام> down` را اجرا کنید.
-
-### ۵-۳. آماده کردن یک سرور مقصد جدید
-
-روی هر سروری که در `target_host` می‌آید:
-
-<div dir="ltr">
-
-```bash
-# ۱. کاربر deploy در گروه docker
-sudo useradd -m -s /bin/bash -G docker deploy
-
-# ۲. کلید عمومی SSH جنکینز (جفت کلید PAAS_SSH_CRED)
-sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
-echo 'ssh-ed25519 AAAA... jenkins-deploy' | sudo tee /home/deploy/.ssh/authorized_keys
-sudo chown deploy:deploy /home/deploy/.ssh/authorized_keys && sudo chmod 600 /home/deploy/.ssh/authorized_keys
-
-# ۳. پوشه‌ی برنامه‌ها، قابل نوشتن برای deploy
-sudo install -d -o deploy -g docker /opt/apps
-
-# ۴. پیش‌نیازها: docker، docker compose (plugin یا docker-compose)، python3 (برای Ansible)
-docker compose version && python3 --version
-```
-
-</div>
-
-بعد از روی agent جنکینز تست کنید:
-
-<div dir="ltr">
-
-```bash
-ssh -i <کلید> deploy@app-server-01 'docker ps'
-```
-
-</div>
-
-> ⚠️ عضو گروه `docker` بودن عملاً معادل دسترسی root روی آن سرور است. این کاربر و کلید را فقط Jenkins باید داشته باشد.
-
-**host key:** در lab بررسی host key خاموش است. در محیط واقعی، کلید هر سرور را در `~/.ssh/known_hosts` کاربر agent جنکینز اضافه کنید (`ssh-keyscan app-server-01 >> ~/.ssh/known_hosts`) و متغیر سراسری `PAAS_HOST_KEY_CHECKING=True` را تنظیم کنید.
-
-### ۵-۴. آماده کردن repo استقرار یک سرویس
-
-۱. در GitLab یک repo بسازید (مثلاً `platform/hello-web-deploy`) با حداقل یک commit (مثلاً README).
-۲. کاربر bot جنکینز را **Maintainer** (یا Developer با اجازه‌ی push روی branch) کنید.
-۳. به توسعه‌دهنده‌ها حداکثر دسترسی **Reporter** (فقط خواندن) بدهید، یا هیچ دسترسی‌ای ندهید. هدف این است که فقط از طریق Jenkins تغییر کند.
-۴. اگر branch محافظت‌شده است، اجازه‌ی push را به bot بدهید.
-
-### ۵-۵. کاربران و نقش‌ها در Jenkins
-
-دسترسی‌ها با پلاگین **Role-based Authorization Strategy** تعریف شده‌اند:
-
-| نقش | نوع | دسترسی‌ها |
-|---|---|---|
-| `admin` | Global | Overall/Administer |
-| `authenticated-read` | Global (برای همه‌ی کاربران وارد شده) | Overall/Read |
-| `paas-user` | Item، الگوی `paas(/.*)?` | Job/Read، Job/Build، Job/Cancel |
-
-**اضافه کردن توسعه‌دهنده یا تأییدکننده:**
-
-۱. کاربر را بسازید (یا اگر Jenkins به LDAP/AD وصل است، کاربر از قبل هست).
-۲. **Manage Jenkins** ← **Manage and Assign Roles** ← **Assign Roles** ← در بخش **Item roles** کاربر (یا گروه LDAP) را اضافه کنید و تیک `paas-user` را بزنید.
-۳. اگر تأییدکننده است، شناسه‌اش را در `approvers` سرویس‌های مربوط در `services.yaml` هم بگذارید. **تأییدکننده هم باید نقش `paas-user` را داشته باشد** تا build را ببیند و بتواند تأیید کند.
-
-> ℹ️ `Job/Cancel` به توسعه‌دهنده اجازه می‌دهد درخواست منتظرِ خودش را لغو کند، ولی با همین دسترسی می‌تواند build **دیگران** را هم در پوشه‌ی `paas` متوقف کند. اگر این را نمی‌خواهید، `Job/Cancel` را از نقش بردارید (آن‌وقت فقط approver می‌تواند درخواست را با Abort رد کند).
->
-> ⚠️ هرگز Job/Configure، Job/Workspace یا Credentials را به `paas-user` ندهید. با Configure هر کسی می‌تواند Jenkinsfile را عوض کند و به credentialها برسد.
->
-> در lab، این تنظیمات از `lab/jenkins/casc.yaml` (JCasC) می‌آیند و با هر ری‌استارت Jenkins دوباره اعمال می‌شوند. تغییرات دستی در UI در lab ماندگار نیستند.
-
-### ۵-۶. پیگیری (audit): چه کسی، چه چیزی، کی؟
+### ۴-۵. پیگیری (audit)
 
 | کجا | چه اطلاعاتی |
 |---|---|
-| **git** (repo استقرار هر سرویس) | هر deploy یک commit است: author = درخواست‌دهنده، و در پیام commit: `Requested-by`، `Approved-by`، `Jenkins-build` (لینک build) |
-| **Jenkins** – Build History | توضیح هر build: «سرویس – requested by X, approved by Y»، و Console کامل شامل فایل |
-| **روی سرور** – `<deploy_dir>/.compose-paas.json` | commit دقیقی که الان اجرا می‌شود، درخواست‌دهنده، تأییدکننده و لینک build |
+| **GitLab** – تاریخچه‌ی repo CD | هر آپلود یک commit است: author = کاربر Jenkins، committer = Jenkins، و در پیام commit: `Uploaded-by` و `Jenkins-build` (لینک build) |
+| **Jenkins** – Build History در `upload-compose` | توضیح هر build: «مسیر – by کاربر @ commit»، و Console کامل شامل خود فایل |
 
-<div dir="ltr">
+### ۴-۶. تغییر token
 
-```bash
-# روی سرور: الان چه نسخه‌ای اجراست؟
-cat /opt/apps/hello-web/.compose-paas.json
-```
+۱. در GitLab برای bot یک token جدید بسازید.
+۲. credential `gitlab-bot` را در Jenkins به‌روز کنید.
+۳. یک show-compose اجرا کنید تا مطمئن شوید کار می‌کند.
+۴. token قدیمی را در GitLab revoke کنید.
 
-</div>
+### ۴-۷. تغییر خود پایپ‌لاین‌ها
 
-### ۵-۷. نصب روی Jenkins واقعی (production)
-
-۱. **repo پایپ‌لاین‌ها**: همین پروژه را در GitLab سازمان push کنید (مثلاً `platform/compose-paas`).
-۲. **repo تنظیمات**: `platform/paas-config` را با یک `services.yaml` بسازید (نمونه: `config-example/services.yaml`). فقط ادمین‌ها دسترسی نوشتن داشته باشند.
-۳. **کاربر bot در GitLab**: یک کاربر (مثلاً `jenkins-bot`) با Personal Access Token با scopeهای `read_repository` و `write_repository`. روی repo پایپ‌لاین و تنظیمات دسترسی خواندن، و روی repoهای استقرار دسترسی push.
-۴. **پلاگین‌ها**: فهرست کامل در `lab/jenkins/plugins.txt` (مهم‌ترین‌ها: `role-strategy`، `file-parameters`، `job-dsl`، `lockable-resources`، `pipeline-utility-steps`، `credentials-binding`، `git`).
-۵. **agent**: یک agent با label **`paas`** که `git`، `ansible` و `ssh` روی آن نصب باشد.
-۶. **credentialها** (Manage Jenkins ← Credentials ← System ← Global):
-   - `gitlab-bot`: نوع *Username with password*؛ username = `jenkins-bot`، password = token.
-   - `deploy-ssh`: نوع *SSH Username with private key*؛ username = `deploy`، کلید خصوصی.
-۷. **متغیرهای سراسری** (Manage Jenkins ← System ← Global properties ← Environment variables):
-
-| متغیر | مثال |
-|---|---|
-| `PAAS_CONFIG_REPO` | `https://gitlab.example.com/platform/paas-config.git` |
-| `PAAS_CONFIG_BRANCH` | `main` |
-| `PAAS_PIPELINE_REPO` | `https://gitlab.example.com/platform/compose-paas.git` |
-| `PAAS_PIPELINE_BRANCH` | `main` |
-| `PAAS_GIT_CRED` | `gitlab-bot` |
-| `PAAS_SSH_CRED` | `deploy-ssh` |
-| `PAAS_HOST_KEY_CHECKING` | `True` (بعد از پر کردن known_hosts) |
-
-۸. **امنیت Job DSL**: Manage Jenkins ← Security ← *Enable script security for Job DSL scripts* را خاموش کنید، یا بعد از اولین اجرای sync اسکریپت را در *In-process Script Approval* تأیید کنید. (job sync فقط برای ادمین است و اسکریپتش از repo ادمین می‌آید.)
-۹. **نقش‌ها**: مطابق [بخش ۵-۵](#۵-۵-کاربران-و-نقشها-در-jenkins).
-۱۰. **job ادمین**: پوشه‌ی `paas-admin` بسازید و داخلش یک Pipeline با نام `sync-registry`: *Pipeline script from SCM* ← repo پایپ‌لاین‌ها ← Script Path: `jenkins/Jenkinsfile.sync`. فقط ادمین به این پوشه دسترسی داشته باشد.
-۱۱. `sync-registry` را اجرا کنید. پوشه‌ی `paas` و دو job توسعه‌دهنده ساخته می‌شوند.
-۱۲. با یک کاربر توسعه‌دهنده‌ی آزمایشی وارد شوید و بررسی کنید که فقط پوشه‌ی `paas` را می‌بیند.
-
-### ۵-۸. تغییر رمزها و کلیدها
-
-| چه چیزی | چطور |
-|---|---|
-| token کاربر bot | token جدید در GitLab بسازید ← credential `gitlab-bot` را در Jenkins به‌روز کنید ← token قدیمی را revoke کنید |
-| کلید SSH deploy | کلید جدید بسازید ← public key را روی همه‌ی سرورها **اضافه** کنید ← credential `deploy-ssh` را عوض کنید ← یک deploy تست ← کلید قدیمی را از `authorized_keys` حذف کنید |
-
-### ۵-۹. تغییر خود پایپ‌لاین‌ها
-
-فایل‌های `jenkins/*` و `ansible/*` را در repo پایپ‌لاین‌ها تغییر دهید و push کنید. buildهای بعدی خودشان نسخه‌ی جدید را از git می‌خوانند. اگر **پارامترهای** jobها عوض شده (فایل `jenkins/jobs.groovy`)، `sync-registry` را اجرا کنید.
+فایل‌های `jenkins/*` را در repo پایپ‌لاین‌ها تغییر دهید و push کنید. buildهای بعدی نسخه‌ی جدید را خودشان می‌خوانند. اگر **پارامترهای** jobها را عوض کرده‌اید (فایل `jenkins/jobs.groovy`)، `refresh-paths` را اجرا کنید.
 
 ---
 
-## ۶. محیط تست محلی (lab)
+## ۵. محیط تست محلی (lab)
 
-lab همه‌چیز را روی یک ماشین بالا می‌آورد: **GitLab CE 17.10.5** (همان نسخه‌ی GitLab سازمان)، **Jenkins** با همه‌ی تنظیمات، و یک **سرور مقصد** (Docker داخل Docker با SSH) که برنامه‌ها روی آن deploy می‌شوند.
+lab همه‌چیز را روی یک ماشین بالا می‌آورد: **GitLab CE 17.10.5**، که یک repo CD نمونه به اسم `platform/cd` دارد، و **Jenkins** با همه‌ی تنظیمات.
 
 <div dir="ltr">
 
-```bash
+```
 cd ~/infra/docker-compose-platform
 
-lab/up.sh        # بالا آوردن (بار اول چند دقیقه طول می‌کشد) – در پایان نام‌های کاربری و رمزها را چاپ می‌کند
-tests/e2e.sh     # تست کامل از طریق API جنکینز (۴۰ بررسی)
-lab/down.sh      # خاموش کردن (داده‌ها می‌مانند)
-lab/down.sh --wipe   # خاموش کردن + پاک کردن همه‌ی داده‌ها و رمزها
+lab/up.sh            # بالا آوردن؛ در پایان نام‌های کاربری و رمزها را چاپ می‌کند
+tests/e2e.sh         # تست کامل از طریق API جنکینز (۴۵ بررسی)؛ چند بار هم قابل اجراست
+lab/down.sh          # خاموش کردن (داده‌ها می‌مانند)
+lab/down.sh --wipe   # خاموش کردن و پاک کردن همه‌ی داده‌ها و رمزها
 ```
 
 </div>
 
 | چه چیزی | آدرس | ورود |
 |---|---|---|
-| Jenkins | http://localhost:8090 | کاربران `admin`، `approver1`، `dev1`، `dev2`؛ رمزها در `lab/secrets/jenkins.env` |
+| Jenkins | http://localhost:8090 | کاربران `admin`، `dev1`، `dev2`؛ رمزها در `lab/secrets/jenkins.env` |
 | GitLab | http://localhost:8929 | کاربر `root`؛ رمز در `lab/.env` |
-| برنامه‌های deploy شده | http://localhost:18080 تا 18089 | — |
+| repo CD | http://localhost:8929/platform/cd | |
 
 <div dir="ltr">
 
-```bash
-# دیدن رمزها
-cat lab/secrets/jenkins.env lab/.env
+```
+cat lab/secrets/jenkins.env lab/.env      # دیدن رمزها
 ```
 
 </div>
 
-**سرویس‌های نمونه در lab:**
+**یک دور تست دستی:**
 
-| سرویس | repo | مسیر فایل | approverها | پورت |
-|---|---|---|---|---|
-| `hello-web` | `platform/hello-web-deploy` | `deploy/docker-compose.yml` | approver1، admin | 18080 |
-| `whoami` | `platform/whoami-deploy` | `compose/production/docker-compose.yml` | فقط approver1 | 18081 |
+۱. یک فایل روی لپ‌تاپ بسازید، مثلاً `payment.yml`:
 
-فایل‌های نمونه برای آپلود در `tests/fixtures/` هستند (`hello-v1.yml`، `hello-v2.yml`، `whoami.yml`).
+<div dir="ltr">
 
-**یک دور کامل تست دستی در lab:**
+```yaml
+services:
+  payment-api:
+    image: registry.example.com/payment-api:1.5.0
+    ports:
+      - "8081:8080"
+```
 
-۱. با `dev1` وارد شوید ← **paas** ← **deploy-compose** ← **Build with Parameters** ← SERVICE = `hello-web`، فایل `tests/fixtures/hello-v2.yml` را آپلود کنید ← **Build**.
-۲. Console را ببینید: فایل چاپ شده و build منتظر تأیید است. روی **Approve & deploy** بزنید ← پیغام می‌دهد که اجازه ندارید.
-۳. در یک مرورگر دیگر (یا پنجره‌ی ناشناس) با `approver1` وارد شوید ← همان build ← **Approve & deploy**.
-۴. صبر کنید تا SUCCESS شود. http://localhost:18080 را باز کنید: `hello-web v2`.
-۵. در GitLab (با root) به `platform/hello-web-deploy` بروید و commit جدید را با `Requested-by: dev1` و `Approved-by: approver1` ببینید.
-۶. با `dev1`: **show-compose** ← `hello-web` ← Console: فایل از git خوانده و نمایش داده می‌شود.
+</div>
 
-> lab فقط برای تست است: سرور مقصد `privileged` اجرا می‌شود، بررسی host key خاموش است، و رمزها در فایل‌های محلی‌اند (این فایل‌ها commit نمی‌شوند). اگر `jenkins/` یا `ansible/` را تغییر دادید، دوباره `lab/up.sh` را اجرا کنید تا به GitLab داخل lab push شوند.
+۲. در Jenkins با `dev1` وارد شوید. پوشه‌ی **cd** را باز کنید، **upload-compose** را انتخاب کنید و **Build with Parameters** را بزنید.
+   - TARGET: `services/payment/docker-compose.yml`
+   - COMPOSE_FILE: فایل `payment.yml`
+   - CHANGE_NOTE: `bump to 1.5.0`
+   - **Build** را بزنید.
+۳. در Console Output، فایل و لینک commit را می‌بینید و build باید SUCCESS شود.
+۴. در GitLab با `root` وارد شوید و repo `platform/cd` را باز کنید. در بخش Commits، commit شما با نویسنده‌ی `dev1` آمده است. فایل `services/payment/docker-compose.yml` هم الان همان محتوای آپلودی شماست.
+۵. با `dev1` job **show-compose** را برای همان مسیر اجرا کنید. فایل جدید در Console نمایش داده می‌شود.
+۶. (اختیاری) در GitLab با `root` یک پوشه‌ی جدید بسازید، مثلاً `services/billing/docker-compose.yml`. بعد با `admin` job **cd-admin/refresh-paths** را اجرا کنید، یا ۵ دقیقه صبر کنید. مسیر جدید باید در لیست TARGET ظاهر شود.
+
+> lab فقط برای تست است و رمزهایش در فایل‌های محلی‌اند (commit نمی‌شوند). اگر `jenkins/` را تغییر دادید، دوباره `lab/up.sh` را اجرا کنید تا به GitLab داخل lab push شود.
 
 ---
 
-## ۷. سؤالات متداول
+## ۶. سؤالات متداول
 
-**آیا می‌توانم فایل‌های دیگری مثل `.env` یا config هم بفرستم؟**
-خیر، فعلاً فقط `docker-compose.yml`. متغیرهای ساده را مستقیم در `environment:` بنویسید (به‌جز رمزها). برای رمزها و فایل‌های config با ادمین هماهنگ کنید.
+**می‌توانم فایل را در مسیر جدیدی بگذارم که هنوز در repo نیست؟**
+خیر، عمداً. فقط مسیرهای موجود در لیست هستند. پوشه‌ی جدید را ادمین (یا هر کسی که دسترسی repo دارد) می‌سازد.
 
-**اگر دو نفر هم‌زمان برای یک سرویس درخواست بفرستند چه می‌شود؟**
-هر دو منتظر تأیید می‌مانند. بعد از تأیید، مرحله‌ی commit و deploy برای هر سرویس **قفل** دارد: درخواست‌ها پشت سر هم اجرا می‌شوند، نه هم‌زمان. آخری که اجرا شود، نسخه‌ی نهایی است. درخواست‌های سرویس‌های **متفاوت** موازی اجرا می‌شوند.
+**اگر دو نفر هم‌زمان آپلود کنند چه می‌شود؟**
+آپلودها پشت سر هم انجام می‌شوند (قفل روی repo). اگر فایل‌ها متفاوت باشند، هر دو ثبت می‌شوند. اگر هر دو نفر یک فایل را فرستاده باشند، آخری برنده است؛ هر دو commit در تاریخچه می‌مانند.
 
-**یک درخواست منتظر تأیید، executor جنکینز را اشغال می‌کند؟**
-خیر. مرحله‌ی تأیید بدون agent اجرا می‌شود؛ ده‌ها درخواست منتظر هیچ منبعی اشغال نمی‌کنند.
+**اگر کسی هم‌زمان مستقیم در repo push کند؟**
+مشکلی نیست. Jenkins تغییر شما را روی آخرین نسخه rebase می‌کند و دوباره push می‌کند. تغییر آن شخص هم حفظ می‌شود.
 
-**اگر همان فایلی را که الان در git هست دوباره بفرستم؟**
-commit جدیدی ساخته نمی‌شود (Console می‌گوید `nothing to commit`)، ولی همان فایل دوباره deploy می‌شود. این برای وقتی مفید است که کانتینرها روی سرور دستی تغییر کرده‌اند و می‌خواهید به حالت git برگردند.
+**فایل‌های دیگر مثل `.env` یا config را هم می‌توانم بفرستم؟**
+فعلاً فقط فایل‌های compose. اگر لازم شد، با تغییر `CD_PATH_REGEX` و کمی تغییر در پایپ‌لاین قابل اضافه شدن است.
 
-**می‌توانم ببینم الان روی سرور دقیقاً چه چیزی اجرا می‌شود؟**
-`show-compose` چیزی را نشان می‌دهد که در **git** هست. اگر آخرین deploy موفق بوده، همان روی سرور هم هست. اگر آخرین deploy با FAILURE تمام شده، ممکن است فرق داشته باشد. ادمین می‌تواند `.compose-paas.json` را روی سرور ببیند.
-
-**چرا فایل قبل از deploy خودکار بررسی نمی‌شود؟**
-در این نسخه تنها کنترل، تأیید انسانی است. اضافه کردن بررسی خودکار (اعتبار فایل با `docker compose config`، رد کردن `privileged`، `network_mode: host`، mount کردن `docker.sock` و ...) قبل از مرحله‌ی تأیید امکان‌پذیر است. اگر لازم دارید به ادمین پلتفرم بگویید.
-
-**آیا ادمین می‌تواند بدون تأیید deploy کند؟**
-از طریق این سیستم خیر؛ ادمین هم برای درخواست خودش به تأیید فرد دیگری نیاز دارد.
+**قبل از push، کسی فایل را بررسی یا تأیید می‌کند؟**
+خیر؛ طبق طراحی فعلی فایل مستقیم push می‌شود. اگر بعداً لازم شد، می‌شود مرحله‌ی تأیید یا بررسی خودکار اضافه کرد، یا Jenkins را به‌جای push مستقیم به ساختن Merge Request تغییر داد.
 
 </div>

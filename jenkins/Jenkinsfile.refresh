@@ -1,0 +1,49 @@
+// cd-admin/refresh-paths - admin only.
+// Lists the compose files in the CD repository and (re)generates the
+// developer jobs so their TARGET dropdown matches the repo. Runs by itself
+// when the CD repo changes (SCM polling) and can be run by hand.
+
+pipeline {
+    agent { label 'cd' }
+    triggers {
+        // Polls the CD repo checked out below (poll: true) as well as the
+        // pipeline repo. Takes effect after the job's first run.
+        pollSCM('H/5 * * * *')
+    }
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '50'))
+    }
+    stages {
+        stage('Scan repo & generate jobs') {
+            steps {
+                script {
+                    def cd = load 'jenkins/cdrepo.groovy'
+                    dir('_cd') {
+                        git url: env.CD_REPO, branch: cd.branch(), credentialsId: env.CD_GIT_CRED,
+                            poll: true, changelog: false
+                    }
+                    def paths = cd.composePaths('_cd')
+                    if (paths.isEmpty()) {
+                        error("No compose files matching /${cd.pathRegex()}/ in ${env.CD_REPO} (${cd.branch()}).")
+                    }
+                    echo "Compose files in ${env.CD_REPO} (${cd.branch()}):\n  ${paths.join('\n  ')}"
+
+                    jobDsl(targets: 'jenkins/jobs.groovy',
+                           removedJobAction: 'IGNORE',
+                           removedViewAction: 'IGNORE',
+                           additionalParameters: [
+                               PATHS           : paths,
+                               CD_REPO         : env.CD_REPO,
+                               CD_BRANCH       : cd.branch(),
+                               PIPELINE_REPO   : env.CD_PIPELINE_REPO,
+                               PIPELINE_BRANCH : env.CD_PIPELINE_BRANCH ?: 'main',
+                               GIT_CRED        : env.CD_GIT_CRED,
+                           ])
+                }
+            }
+        }
+    }
+    post { always { deleteDir() } }
+}

@@ -1,11 +1,11 @@
 # Jenkins configuration as code (lab). Passwords/tokens come from the
 # environment (secrets/jenkins.env) and /run/secrets, never from this file.
 jenkins:
-  systemMessage: "compose-paas (lab) - deploy docker-compose services through Jenkins"
+  systemMessage: "compose-cd (lab) - upload docker-compose files to the CD repository"
   numExecutors: 4
-  # The pipelines run on nodes labelled `paas` (needs git + ansible + ssh).
-  # In the lab that's the built-in node; in production, an agent.
-  labelString: "paas"
+  # The pipelines run on nodes labelled `cd` (they only need git). In the
+  # lab that's the built-in node; in production, any agent with git.
+  labelString: "cd"
   securityRealm:
     local:
       allowsSignup: false
@@ -13,19 +13,14 @@ jenkins:
         - id: admin
           name: "Platform Admin"
           password: ${JENKINS_ADMIN_PASSWORD}
-        - id: approver1
-          name: "Approver One"
-          password: ${JENKINS_APPROVER1_PASSWORD}
         - id: dev1
           name: "Developer One"
           password: ${JENKINS_DEV1_PASSWORD}
         - id: dev2
           name: "Developer Two"
           password: ${JENKINS_DEV2_PASSWORD}
-  # Role-based: developers/approvers can only see and BUILD the jobs in the
-  # `paas` folder. No Configure, no Workspace, no access to `paas-admin`.
-  # Who may APPROVE a deploy is decided per service in services.yaml
-  # (approvers:), enforced by the pipeline's input step.
+  # Role-based: developers can only see and BUILD the jobs in the `cd`
+  # folder. No Configure, no Workspace, no access to `cd-admin`.
   authorizationStrategy:
     roleBased:
       roles:
@@ -41,29 +36,26 @@ jenkins:
             entries:
               - group: "authenticated"
         items:
-          - name: "paas-user"
-            pattern: "paas(/.*)?"
+          - name: "cd-user"
+            pattern: "cd(/.*)?"
             permissions:
               - "Job/Read"
               - "Job/Build"
-              - "Job/Cancel"
             entries:
               - user: "dev1"
               - user: "dev2"
-              - user: "approver1"
   globalNodeProperties:
     - envVars:
         env:
-          - {key: PAAS_CONFIG_REPO, value: "http://cp-gitlab/platform/paas-config.git"}
-          - {key: PAAS_CONFIG_BRANCH, value: "main"}
-          - {key: PAAS_PIPELINE_REPO, value: "http://cp-gitlab/platform/compose-paas.git"}
-          - {key: PAAS_PIPELINE_BRANCH, value: "main"}
-          - {key: PAAS_GIT_CRED, value: "gitlab-bot"}
-          - {key: PAAS_SSH_CRED, value: "deploy-ssh"}
+          - {key: CD_REPO, value: "http://cp-gitlab/platform/cd.git"}
+          - {key: CD_BRANCH, value: "main"}
+          - {key: CD_GIT_CRED, value: "gitlab-bot"}
+          - {key: CD_PIPELINE_REPO, value: "http://cp-gitlab/platform/compose-cd.git"}
+          - {key: CD_PIPELINE_BRANCH, value: "main"}
 
 security:
-  # The sync job's Job DSL script comes from the admin-owned pipeline repo
-  # and the job itself is admin-only.
+  # The refresh job's Job DSL script comes from the admin-owned pipeline
+  # repo and the job itself is admin-only.
   globalJobDslSecurityConfiguration:
     useScriptSecurity: false
 
@@ -74,17 +66,9 @@ credentials:
           - usernamePassword:
               scope: GLOBAL
               id: gitlab-bot
-              description: "GitLab bot account: read config/pipelines, push compose files to service repos"
+              description: "GitLab bot account: read the pipeline repo, read + push the CD repo"
               username: jenkins-bot
               password: ${readFile:/run/secrets/gitlab-bot-token}
-          - basicSSHUserPrivateKey:
-              scope: GLOBAL
-              id: deploy-ssh
-              username: deploy
-              description: "SSH key Jenkins uses to deploy onto target hosts"
-              privateKeySource:
-                directEntry:
-                  privateKey: ${readFile:/run/secrets/deploy-ssh-key}
 
 unclassified:
   location:
@@ -92,25 +76,25 @@ unclassified:
 
 jobs:
   # Only the admin job is created here; it generates the developer jobs
-  # from services.yaml (see jenkins/Jenkinsfile.sync).
+  # from the compose files it finds in the CD repo (jenkins/Jenkinsfile.refresh).
   - script: |
-      folder('paas-admin') {
+      folder('cd-admin') {
         description('Admin only - not visible to developers.')
       }
-      pipelineJob('paas-admin/sync-registry') {
-        description('Reads services.yaml from the config repo and (re)generates the developer jobs in the paas folder.')
+      pipelineJob('cd-admin/refresh-paths') {
+        description('Scans the CD repository for compose files and (re)generates the developer jobs in the cd folder. Also runs by itself when the CD repo changes.')
         definition {
           cpsScm {
             scm {
               git {
                 remote {
-                  url('http://cp-gitlab/platform/compose-paas.git')
+                  url('http://cp-gitlab/platform/compose-cd.git')
                   credentials('gitlab-bot')
                 }
                 branch('*/main')
               }
             }
-            scriptPath('jenkins/Jenkinsfile.sync')
+            scriptPath('jenkins/Jenkinsfile.refresh')
             lightweight(true)
           }
         }

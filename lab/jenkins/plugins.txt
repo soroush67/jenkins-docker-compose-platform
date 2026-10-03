@@ -5,7 +5,6 @@ pipeline-utility-steps
 git
 credentials
 credentials-binding
-ssh-credentials
 plain-credentials
 job-dsl
 cloudbees-folder
