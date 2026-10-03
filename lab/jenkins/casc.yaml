@@ -1,0 +1,117 @@
+# Jenkins configuration as code (lab). Passwords/tokens come from the
+# environment (secrets/jenkins.env) and /run/secrets, never from this file.
+jenkins:
+  systemMessage: "compose-paas (lab) - deploy docker-compose services through Jenkins"
+  numExecutors: 4
+  # The pipelines run on nodes labelled `paas` (needs git + ansible + ssh).
+  # In the lab that's the built-in node; in production, an agent.
+  labelString: "paas"
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: "Platform Admin"
+          password: ${JENKINS_ADMIN_PASSWORD}
+        - id: approver1
+          name: "Approver One"
+          password: ${JENKINS_APPROVER1_PASSWORD}
+        - id: dev1
+          name: "Developer One"
+          password: ${JENKINS_DEV1_PASSWORD}
+        - id: dev2
+          name: "Developer Two"
+          password: ${JENKINS_DEV2_PASSWORD}
+  # Role-based: developers/approvers can only see and BUILD the jobs in the
+  # `paas` folder. No Configure, no Workspace, no access to `paas-admin`.
+  # Who may APPROVE a deploy is decided per service in services.yaml
+  # (approvers:), enforced by the pipeline's input step.
+  authorizationStrategy:
+    roleBased:
+      roles:
+        global:
+          - name: "admin"
+            permissions:
+              - "Overall/Administer"
+            entries:
+              - user: "admin"
+          - name: "authenticated-read"
+            permissions:
+              - "Overall/Read"
+            entries:
+              - group: "authenticated"
+        items:
+          - name: "paas-user"
+            pattern: "paas(/.*)?"
+            permissions:
+              - "Job/Read"
+              - "Job/Build"
+              - "Job/Cancel"
+            entries:
+              - user: "dev1"
+              - user: "dev2"
+              - user: "approver1"
+  globalNodeProperties:
+    - envVars:
+        env:
+          - {key: PAAS_CONFIG_REPO, value: "http://cp-gitlab/platform/paas-config.git"}
+          - {key: PAAS_CONFIG_BRANCH, value: "main"}
+          - {key: PAAS_PIPELINE_REPO, value: "http://cp-gitlab/platform/compose-paas.git"}
+          - {key: PAAS_PIPELINE_BRANCH, value: "main"}
+          - {key: PAAS_GIT_CRED, value: "gitlab-bot"}
+          - {key: PAAS_SSH_CRED, value: "deploy-ssh"}
+
+security:
+  # The sync job's Job DSL script comes from the admin-owned pipeline repo
+  # and the job itself is admin-only.
+  globalJobDslSecurityConfiguration:
+    useScriptSecurity: false
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: gitlab-bot
+              description: "GitLab bot account: read config/pipelines, push compose files to service repos"
+              username: jenkins-bot
+              password: ${readFile:/run/secrets/gitlab-bot-token}
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: deploy-ssh
+              username: deploy
+              description: "SSH key Jenkins uses to deploy onto target hosts"
+              privateKeySource:
+                directEntry:
+                  privateKey: ${readFile:/run/secrets/deploy-ssh-key}
+
+unclassified:
+  location:
+    url: http://localhost:8090/
+
+jobs:
+  # Only the admin job is created here; it generates the developer jobs
+  # from services.yaml (see jenkins/Jenkinsfile.sync).
+  - script: |
+      folder('paas-admin') {
+        description('Admin only - not visible to developers.')
+      }
+      pipelineJob('paas-admin/sync-registry') {
+        description('Reads services.yaml from the config repo and (re)generates the developer jobs in the paas folder.')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('http://cp-gitlab/platform/compose-paas.git')
+                  credentials('gitlab-bot')
+                }
+                branch('*/main')
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile.sync')
+            lightweight(true)
+          }
+        }
+      }

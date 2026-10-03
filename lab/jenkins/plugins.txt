@@ -1,0 +1,16 @@
+configuration-as-code
+workflow-aggregator
+pipeline-stage-view
+pipeline-utility-steps
+git
+credentials
+credentials-binding
+ssh-credentials
+plain-credentials
+job-dsl
+cloudbees-folder
+role-strategy
+file-parameters
+lockable-resources
+timestamper
+ws-cleanup

@@ -1,0 +1,6 @@
+services:
+  web:
+    image: nginx:1.27-alpine
+    ports:
+      - "18080:80"
+    command: ["/bin/sh", "-c", "echo 'hello-web v1' > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'"]

@@ -1,0 +1,31 @@
+# compose-paas service registry - owned by the platform admins.
+# Developers cannot edit this repo; they only pick a service name in Jenkins.
+# After changing this file, run Jenkins job paas-admin/sync-registry.
+#
+#   <name>:            becomes the docker compose project name ([a-z0-9_-])
+#     description:     shown in the job description
+#     repo:            git repo the compose file is committed to
+#     branch:          (default main)
+#     path:            where in that repo docker-compose.yml lives
+#     target_host:     host Jenkins deploys to over SSH (PAAS_SSH_CRED)
+#     deploy_dir:      directory on target_host
+#     approvers:       Jenkins user ids allowed to approve (overrides defaults)
+defaults:
+  branch: main
+  approvers: [approver1, admin]
+
+services:
+  hello-web:
+    description: "Static hello page on :18080"
+    repo: http://cp-gitlab/platform/hello-web-deploy.git
+    path: deploy/docker-compose.yml
+    target_host: cp-target
+    deploy_dir: /opt/apps/hello-web
+
+  whoami:
+    description: "traefik/whoami echo service on :18081"
+    repo: http://cp-gitlab/platform/whoami-deploy.git
+    path: compose/production/docker-compose.yml
+    target_host: cp-target
+    deploy_dir: /opt/apps/whoami
+    approvers: [approver1]
