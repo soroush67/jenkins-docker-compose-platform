@@ -80,6 +80,12 @@ lab/down.sh      # stop (--wipe: delete data + secrets)
 | GitLab | http://localhost:8929 | `root` - password in `lab/.env` |
 | CD repo | http://localhost:8929/platform/cd | |
 
+If `updates.jenkins.io` / `get.jenkins.io` are unreachable from your network
+(the Jenkins image build hangs at `jenkins-plugin-cli`), put a mirror in
+`lab/.env` before `lab/up.sh`:
+`JENKINS_MIRROR=https://ftp.belnet.be/mirror/jenkins`. Plugins then come from
+the mirror's update center for the image's exact Jenkins LTS version.
+
 `lab/up.sh` is idempotent and re-pushes `jenkins/` into the lab GitLab, so
 rerun it after editing a pipeline. `tests/e2e.sh` covers access control, the
 dropdown contents, show, upload (byte-identical file in git, author, commit

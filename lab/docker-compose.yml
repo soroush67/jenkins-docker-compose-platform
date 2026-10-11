@@ -36,7 +36,11 @@ services:
 
 
   jenkins:
-    build: ./jenkins
+    build:
+      context: ./jenkins
+      args:
+        # set in .env when updates.jenkins.io is unreachable (see README)
+        JENKINS_MIRROR: ${JENKINS_MIRROR:-}
     container_name: cp-jenkins
     hostname: cp-jenkins
     restart: unless-stopped
